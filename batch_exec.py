@@ -2,6 +2,7 @@ import paramiko
 from concurrent.futures import ThreadPoolExecutor
 import time
 import logging
+from concurrent.futures import TimeoutError as FuturesTimeout
 
 """
 #logging初始化信息配置方法
@@ -15,6 +16,7 @@ app_log = logging.getLogger("app_log")
 app_log.setLevel(logging.DEBUG)
 
 check_log = logging.getLogger("check_log")
+check_log.setLevel(logging.INFO)
 
 '''
 app_log.addHandler()
@@ -61,20 +63,23 @@ class Device:
         self.paths=[]
         self.w=w
 
-class Run:
-    def disk_check(self,server):
+    def inspect(self):
+        pass
+
+class Server(Device):
+    def inspect(self):
         IGNORE_FS = {'proc','tmpfs','sysfs','devtmpfs','cgroup','cgroup2','overlay','squashfs','autofs','mqueue','debugfs','tracefs'}
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy)
         try:
             ssh.connect(
-                hostname=server.ip,
-                port=server.port,
-                username=server.username,
-                password=server.password,
+                hostname=self.ip,
+                port=self.port,
+                username=self.username,
+                password=self.password,
                 timeout=10
                 )
-            app_log.debug(f"{server.ip}连接成功")
+            app_log.debug(f"{self.ip}连接成功")
             #print(f"{server.ip}连接成功\n")
 
             stdin,stdout,stderr=ssh.exec_command('df -P')
@@ -86,40 +91,50 @@ class Run:
                 for lines in output.splitlines()[1:]:
                     parts=lines.split(maxsplit=5)
                     if parts[0] not in IGNORE_FS:
-                        if int(parts[2])//int(parts[3])*100 > server.w:
-                            check_log.warnging(f"磁盘分区{parts[5]}使用率过高,已达到{parts[4]},请及时清理磁盘")
-                        server.paths.append(parts)
-                        app_log.debug(f"{server.ip}巡检任务已完成")
+                        #parts[2]是使用情况，parts[3]是剩余情况，整体算法应该是parts[2]/(parts[3]+parts[2])*100,直接可以用parts[4]
+                        if int(parts[4].rstrip('%'))> self.w:
+                            #拼写错误
+                            check_log.warning(f"磁盘分区{parts[5]}使用率过高,已达到{parts[4]},请及时清理磁盘")
+                        self.paths.append(parts)
+                        app_log.debug(f"{self.ip}巡检任务已完成")
             if errput:
                 app_log.warning(f"命令执行失败，详细错误日志为:{errput}")
                     
         except paramiko.AuthenticationException as e:
-            app_log.warning(f"{server.ip}认证失败！账户密码错误:{e}")
+            app_log.warning(f"{self.ip}认证失败！账户密码错误:{e}")
         except paramiko.SSHException as e:
-            app_log.warning(f"{server.ip}SSH连接失败：{e}")
+            app_log.warning(f"{self.ip}SSH连接失败：{e}")
         except Exception as e:
-            app_log.warning(f"{server.ip}系统执行失败：{e}")
+            app_log.warning(f"{self.ip}系统执行失败：{e}")
         finally:
             ssh.close()
-            return server.paths
+        #return 不能放在finally里面，会吞掉各类报错告警信息，无法获取到真实的错误，将return调整为函数完成后return
+        return self.paths
+
+class Switch(Device):
+    def inspect(self):
+        pass
+
+def check(x):
+    x.inspect()
+        
 
 
 
 servers=[]
 #批量获取服务器清单
 for i in range(10):
-    servers.append(Device(ip="192.168.1.100",username="root",password="111"))
+    servers.append(Server(ip="192.168.1.1",username="root",password="123"))
 
 
-run=Run()
 
 with ThreadPoolExecutor(max_workers=3) as executor:
-    futures = [executor.submit(run.disk_check,i) for i in servers]
+    futures = [executor.submit(check,i) for i in servers]
 
     for future in futures:
         try:
             future.result(timeout=5)
-        except TimeoutError:
+        except FuturesTimeout:
             app_log.warning(f"执行任务超时！")
 
 """
