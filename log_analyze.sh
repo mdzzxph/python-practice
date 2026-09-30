@@ -18,8 +18,9 @@ IFSbak=$IFS
 check_http_status()
 {
 	IFS=$'\n'
-	status=`cat $file | grep -ioE "HTTP\/1\.[1|0]\"[[:blank:]][0-9]{3}" | awk -F" " '{print $2}' | sort | uniq -c | sort  -nr`
-	sums=`cat $file | grep -ioE "HTTP\/1\.[1|0]\"[[:blank:]][0-9]{3}" | wc -l`
+	local file=$1
+	status=`grep -ioE "HTTP\/1\.[10]\"[[:blank:]][0-9]{3}" "$file"  | awk -F" " '{print $2}' | sort | uniq -c | sort  -nr`
+	sums=`cat $file | wc -l`
 	for var in $status
 	do
 		code=`echo $var | awk -F" " '{print($2)}'`
@@ -33,36 +34,28 @@ check_http_status()
 check_http_ip()
 {
 	IFS=$'\n'
-	i=1
-	httpips=`cat $file | grep -o -P '((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)' | sort | uniq -c | sort  -nr `
-	for var in $httpips
-	do
-		if [ $i -le 10  ]
-		then
-			httpip=`echo $var | awk -F" " '{print $2}'`
-			num=`echo $var | awk -F" " '{print($1)}'`
-			echo "前十请求IP为:$httpip，共请求$num次"
-			i=$[$i+1]
-		else
-			break
-		fi
-	done
+	local file=$1
+	grep -o -P '((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)' "$file" | sort | uniq -c | sort  -nr | awk -F" " 'NR<11{print "请求IP为"$2",请求次数"$1}'
 	IFS=$IFSbak
 }
+
 
 check_http_url()
 {
-	IFS=$'\n'
-	cat $file | grep -oP " (\/\w*)+"  | sort | uniq  -c|sort -nr| awk -F" " 'NF<10{print $2"目录被访问了:"$1"次"}'
-	IFS=$IFSbak
+        IFS=$'\n'
+		local file=$1
+        grep -oP " (\/\w*)+"  "$file" | sort | uniq  -c|sort -nr| awk -F" " 'NR<10{print $2"目录被访问了:"$1"次"}'
+        IFS=$IFSbak
 }
 
-if [ -f "$1" ]
+
+if	[ $# -eq 0 ]
 then
+	echo "请输入文件名"
+	exit 1
+else [ -f "$1" ]&&[ -s "$1" ]
 	file=$1
-	check_http_status
-	check_http_ip
-	check_http_url
-else
-	echo "请书写正确的文件名称"
+	check_http_status "$file"
+	check_http_ip "$file"
+	check_http_url "$file"
 fi
